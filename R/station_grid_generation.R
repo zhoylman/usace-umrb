@@ -83,7 +83,7 @@ rect_grig = narr_221_template %>%
   spex::polygonize()
 
 #compute base hex grid
-A = 1e+9 #1.076e+10 = 1000km2 to ft2 (Lambert base unit), 1.394e+10 = 500mi2
+A = 1.4e+9#1e+9 #1.076e+10 = 1000km2 to ft2 (Lambert base unit), 1.394e+10 = 500mi2
 # Corresponding cellsize (length between focal points (hex centers)) :
 CS = 2 * sqrt(A/((3*sqrt(3)/2))) * sqrt(3)/2
 
@@ -94,12 +94,19 @@ base_grid = spsample(umrb %>% as_Spatial(), type="hexagonal", cellsize=CS) %>% #
   st_transform(st_crs(umrb))
 
 ## Get the final grid by identifying cells that are >50% in the area of interest
+# final_grid =
+#   base_grid %>%
+#   dplyr::mutate(UMRB = intersects_100(base_grid, umrb %>% sf::st_union()),
+#                 States = intersects_100(base_grid, states %>% sf::st_union()),
+#                 Elevation = intersects_100(base_grid, under_5500 %>% sf::st_union()),
+#                 Included = as.logical(UMRB * States * Elevation)) %>%
+#   filter(Included == T)
+
 final_grid =
   base_grid %>%
-  dplyr::mutate(UMRB = intersects_100(base_grid, umrb %>% sf::st_union()),
-                States = intersects_100(base_grid, states %>% sf::st_union()),
-                Elevation = intersects_100(base_grid, under_5500 %>% sf::st_union()),
-                Included = as.logical(UMRB * States * Elevation)) %>%
+  dplyr::mutate(States = intersects_percent(base_grid, states %>% sf::st_union(), 30),
+                Elevation = intersects_percent(base_grid, under_5500 %>% sf::st_union(),0.01),
+                Included = as.logical(Elevation * States)) %>%
   filter(Included == T)
 
 #
@@ -111,7 +118,7 @@ final_grid_rect =
                 Included = as.logical(UMRB * States * Elevation)) %>%
   filter(Included == T)
   
-i = st_intersects(final_grid_rect, states, sparse = F) %>%
+i = st_intersects(final_grid, states, sparse = F) %>%
   as.data.frame() %>%
   colSums() %>%
   as.data.frame()
