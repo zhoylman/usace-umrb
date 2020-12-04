@@ -9,10 +9,13 @@ library(magrittr)
 #writeRaster(temp, '/home/zhoylman/usace-umrb/data/narr_221_template.tif')
 narr_221_template = raster('~/usace-umrb/data/narr_221_template.tif')
 
+#import clipping criteria
+#Umrb boundry
 umrb = st_read('~/usace-umrb/data/UMRB_outline.shp') %>%
   rmapshaper::ms_simplify() %>%
   st_transform(st_crs(narr_221_template))
 
+#Under 5500ft shp
 under_5500 = st_read('~/usace-umrb/data/umrb_dem_5500.shp') %>%
   rmapshaper::ms_simplify() %>%
   st_transform(st_crs(umrb))%>%
@@ -20,46 +23,13 @@ under_5500 = st_read('~/usace-umrb/data/umrb_dem_5500.shp') %>%
   sf::st_intersection(., umrb) %>%
   st_geometry()
 
+#states
 states = st_read('~/usace-umrb/data/states.shp') %>%
   filter(STATE_ABBR %in% c('MT',"SD","ND",'WY','NE')) %>%
   #filter(STATE_ABBR %in% c('SD')) %>%
   st_transform(st_crs(umrb))
 
-## A function to identify polygons that retain >= 50% of their after clipping
-intersects_50 <- function(x,y){
-  x %>%
-    dplyr::mutate(id = 1:n(),
-                  full_area = sf::st_area(geometry)) %>%
-    dplyr::left_join(x %>%
-                       dplyr::mutate(id = 1:n()) %>%
-                       sf::st_intersection(y) %>%
-                       dplyr::mutate(cropped_area = sf::st_area(geometry)) %>%
-                       sf::st_drop_geometry()) %>%
-    dplyr::mutate(included = ((cropped_area/full_area) %>%
-                                units::drop_units() %>%
-                                magrittr::is_weakly_greater_than(0.5)),
-                  included = tidyr::replace_na(included, FALSE)) %>%
-    dplyr::arrange(id) %$%
-    included
-}
-
-intersects_100 <- function(x,y){
-  x %>%
-    dplyr::mutate(id = 1:n(),
-                  full_area = sf::st_area(geometry)) %>%
-    dplyr::left_join(x %>%
-                       dplyr::mutate(id = 1:n()) %>%
-                       sf::st_intersection(y) %>%
-                       dplyr::mutate(cropped_area = sf::st_area(geometry)) %>%
-                       sf::st_drop_geometry()) %>%
-    dplyr::mutate(included = ((cropped_area/full_area) %>%
-                                units::drop_units() %>%
-                                magrittr::is_weakly_greater_than(0.99999999999)),
-                  included = tidyr::replace_na(included, FALSE)) %>%
-    dplyr::arrange(id) %$%
-    included
-}
-
+## A function to identify polygons that retain >= XX% of their after clipping
 intersects_percent <- function(x,y,percent){
   x %>%
     dplyr::mutate(id = 1:n(),
@@ -84,6 +54,7 @@ rect_grig = narr_221_template %>%
 
 #compute base hex grid
 A = 1.4e+9#1e+9 #1.076e+10 = 1000km2 to ft2 (Lambert base unit), 1.394e+10 = 500mi2
+A = 1.2e+9
 # Corresponding cellsize (length between focal points (hex centers)) :
 CS = 2 * sqrt(A/((3*sqrt(3)/2))) * sqrt(3)/2
 
@@ -102,23 +73,23 @@ base_grid = spsample(umrb %>% as_Spatial(), type="hexagonal", cellsize=CS) %>% #
 #                 Included = as.logical(UMRB * States * Elevation)) %>%
 #   filter(Included == T)
 
+#compute final hex grid depending conditional constraints
 final_grid =
   base_grid %>%
   dplyr::mutate(States = intersects_percent(base_grid, states %>% sf::st_union(), 30),
-                Elevation = intersects_percent(base_grid, under_5500 %>% sf::st_union(),0.01),
+                Elevation = intersects_percent(base_grid, under_5500 %>% sf::st_union(),60),
                 Included = as.logical(Elevation * States)) %>%
   filter(Included == T)
 
-#
+#Rectangular Grid
 final_grid_rect =
   rect_grig %>%
-  dplyr::mutate(UMRB = intersects_100(rect_grig, umrb %>% sf::st_union()),
-                States = intersects_100(rect_grig, states %>% sf::st_union()),
-                Elevation = intersects_percent(rect_grig, under_5500 %>% sf::st_union(),98),
-                Included = as.logical(UMRB * States * Elevation)) %>%
+  dplyr::mutate(States = intersects_percent(rect_grig, states %>% sf::st_union(), 50),
+                Elevation = intersects_percent(rect_grig, under_5500 %>% sf::st_union(),95),
+                Included = as.logical(States * Elevation)) %>%
   filter(Included == T)
   
-i = st_intersects(final_grid, states, sparse = F) %>%
+i = st_intersects(final_grid_rect, states, sparse = F) %>%
   as.data.frame() %>%
   colSums() %>%
   as.data.frame()
@@ -129,10 +100,12 @@ i
 
 plot(umrb$geometry, main = paste0('\n221 Regional North American Grid (Lambert Conformal)\nTotal Number = ', length(final_grid_rect$geometry)))
 plot(states$geometry, add = T)
+plot(under_5500, add = T)
 plot(final_grid_rect$geometry,add = T, border = 'red')
 
 plot(umrb$geometry, main = paste0('\n221 Regional North American Grid (Lambert Conformal)\nHexigonal Grid Total Number = ', length(final_grid$geometry)))
 plot(states$geometry, add = T)
+plot(under_5500, add = T)
 plot(final_grid$geometry,add = T, border = 'red')
 
 st_write(final_grid, '~/usace-umrb/output/station_selection_grids/hex_grid.shp')

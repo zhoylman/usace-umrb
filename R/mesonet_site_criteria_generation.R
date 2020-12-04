@@ -118,17 +118,18 @@ grid_names = c('hex', 'rect')
 ###########################################
 ####### EXPORT CLIM MASKS IF NEEDED #######
 ###########################################
-
-visualize_clim = FALSE
+#booleen to visualize.. Takes a while, so dont run this in the loop
+#durring export
+visualize_clim = T
 
 for(i in 1:length(clim_names)){
   for(g in 1:length(grid_names)){
     #compute upper quantile of clim vals within grids
     upper_grid = percentile_comp(var = clim_list[[i]], grid = grids[[g]], 
-                                 percentile_int = 95, scale = 4000)
+                                 percentile_int = 90, scale = 4000)
     #compute lower quantile of clim vals within grids
     lower_grid = percentile_comp(var = clim_list[[i]], grid = grids[[g]], 
-                                 percentile_int = 5, scale = 4000)
+                                 percentile_int = 10, scale = 4000)
     #compute valid pixels within percentile grids
     valid_pixels = clim_list[[i]]$
       gte(lower_grid)$
@@ -146,7 +147,7 @@ for(i in 1:length(clim_names)){
         eeObject = clim_list[[i]],
         visParams = list(
           min = 0,
-          max = 1000,
+          max = 100,
           palette = (c("#FF0000","#FFFFFF","#0000FF"))
         ),
         name = "Raw Data"
@@ -154,13 +155,13 @@ for(i in 1:length(clim_names)){
       
       lower_map = Map$addLayer(
         eeObject = lower_grid,
-        visParams = list(min = 0, max = 1000, palette = c("#FF0000","#FFFFFF","#0000FF")),
+        visParams = list(min = 0, max = 100, palette = c("#FF0000","#FFFFFF","#0000FF")),
         name = "Lower Percentile"
       )  
       
       upper_map = Map$addLayer(
         eeObject = upper_grid,
-        visParams = list(min = 0, max = 1000, palette = c("#FF0000","#FFFFFF","#0000FF")),
+        visParams = list(min = 0, max = 100, palette = c("#FF0000","#FFFFFF","#0000FF")),
         name = "Upper Percentile"
       ) 
       
@@ -214,8 +215,13 @@ hex = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/hex_grid
   st_geometry() %>%
   as_Spatial()
 
+rect = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/rect_grid.shp') %>%
+  st_transform(4326) %>%
+  st_geometry() %>%
+  as_Spatial()
+
 #list to store STATSGO for each hex cell
-statsgo_hex = list()
+statsgo = list()
 
 #Define a function to pull in STATSGO and 
 #return polygons with dominant soil type
@@ -241,20 +247,19 @@ get_modal_statsgo = function(x){
 #loop through all the cells 
 # cant use apply on sp objects?! LAME!
 for(i in 1:length(hex)){
-  statsgo_hex[[i]] = get_modal_statsgo(hex[i])
+  statsgo[[i]] = get_modal_statsgo(hex[i])
   print(i)
   if(i == length(hex)){
-    statsgo_hex = do.call('rbind', statsgo_hex)
+    statsgo = do.call('rbind', statsgo)
   }
 }
 #plot and check
-plot(hex)
-plot(statsgo_hex, add = T, col = 'red')
+plot(rect)
+plot(statsgo, add = T, col = 'red')
 
 #convert to sf and export
 statsgo_hex_sf = st_as_sf(statsgo_hex)
-st_write(statsgo_hex_sf, '/home/zhoylman/usace-umrb/output/station_selection_grids/hex_modal_statsgo.shp')
-
+st_write(statsgo %>% st_as_sf(), '/home/zhoylman/usace-umrb/output/station_selection_grids/rect_modal_statsgo.shp')
 
 ###########################################
 ####### SOIL WATER HOLDING CAPACITY  ######
