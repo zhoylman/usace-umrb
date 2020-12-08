@@ -7,6 +7,7 @@ library(magrittr)
 #nc = brick('/home/zhoylman/Downloads/air.mon.mean.nc')
 #temp = nc[[1]]
 #writeRaster(temp, '/home/zhoylman/usace-umrb/data/narr_221_template.tif')
+
 narr_221_template = raster('~/usace-umrb/data/narr_221_template.tif')
 
 #import clipping criteria
@@ -54,7 +55,7 @@ rect_grig = narr_221_template %>%
 
 #compute base hex grid
 A = 1.4e+9#1e+9 #1.076e+10 = 1000km2 to ft2 (Lambert base unit), 1.394e+10 = 500mi2
-A = 1.2e+9
+#A = 1.2e+9
 # Corresponding cellsize (length between focal points (hex centers)) :
 CS = 2 * sqrt(A/((3*sqrt(3)/2))) * sqrt(3)/2
 
@@ -63,6 +64,12 @@ base_grid = spsample(umrb %>% as_Spatial(), type="hexagonal", cellsize=CS) %>% #
   HexPoints2SpatialPolygons()%>%
   st_as_sf() %>%
   st_transform(st_crs(umrb))
+
+# base Albers
+umrb_extent = extent(st_read('~/usace-umrb/data/UMRB_outline.shp') %>%
+               rmapshaper::ms_simplify() %>%
+               st_transform(st_crs(5070)) %>% 
+               extent())
 
 ## Get the final grid by identifying cells that are >50% in the area of interest
 # final_grid =
@@ -89,14 +96,39 @@ final_grid_rect =
                 Included = as.logical(States * Elevation)) %>%
   filter(Included == T)
   
-i = st_intersects(final_grid_rect, states, sparse = F) %>%
-  as.data.frame() %>%
-  colSums() %>%
-  as.data.frame()
-rownames(i) = unique(states$STATE_NAME)
+#Albers
+cell_size = 22 # in miles
 
-i
+albers_base = 
+  raster(xmn=umrb_extent[1], xmx=umrb_extent[2], ymn=umrb_extent[3], ymx=umrb_extent[4],
+         res = c(1609.34 * cell_size, 1609.34 * cell_size),
+         crs = sp::CRS("+init=epsg:5070")) %>%
+  spex::polygonize() %>%
+  dplyr::filter(sf::st_intersects(st_read('~/usace-umrb/data/UMRB_outline.shp') %>%
+                                    rmapshaper::ms_simplify() %>%
+                                    st_transform(st_crs(5070)),
+                                  sparse = FALSE)[,1])
 
+plot(st_read('~/usace-umrb/data/UMRB_outline.shp') %>%
+       rmapshaper::ms_simplify() %>%
+       st_transform(st_crs(5070)) %>%
+       st_geometry(), col = 'red'); plot(albers_base, add = T)
+
+albers_final = albers_base %>%
+  dplyr::mutate(States = intersects_percent(albers_base, states %>% st_transform(st_crs(5070))%>% sf::st_union(), 50),
+                Elevation = intersects_percent(albers_base, under_5500 %>% st_transform(st_crs(5070)) %>% sf::st_union(),50),
+                Included = as.logical(States * Elevation)) %>%
+  filter(Included == T)
+
+plot(umrb$geometry %>% st_transform(st_crs(5070)), main = paste0('\nAlbers Equal Area (epsg: 5070)\nTotal Number = ', length(albers_final$geometry)))
+plot(states$geometry %>% st_transform(st_crs(5070)), add = T)
+plot(under_5500 %>% st_transform(st_crs(5070)), add = T)
+plot(albers_final$geometry,add = T, border = 'red')
+
+plot(umrb$geometry, main = paste0('\n221 Regional North American Grid (Lambert Conformal)\nTotal Number = ', length(final_grid_rect$geometry)))
+plot(states$geometry, add = T)
+plot(under_5500, add = T)
+plot(final_grid_rect$geometry,add = T, border = 'red')
 
 plot(umrb$geometry, main = paste0('\n221 Regional North American Grid (Lambert Conformal)\nTotal Number = ', length(final_grid_rect$geometry)))
 plot(states$geometry, add = T)
@@ -108,5 +140,14 @@ plot(states$geometry, add = T)
 plot(under_5500, add = T)
 plot(final_grid$geometry,add = T, border = 'red')
 
+i = st_intersects(final_grid_rect, states, sparse = F) %>%
+  as.data.frame() %>%
+  colSums() %>%
+  as.data.frame()
+rownames(i) = unique(states$STATE_NAME)
+
+i
+
 st_write(final_grid, '~/usace-umrb/output/station_selection_grids/hex_grid.shp')
 st_write(final_grid_rect, '~/usace-umrb/output/station_selection_grids/rect_grid.shp')
+st_write(albers_final, '~/usace-umrb/output/station_selection_grids/albers_grid.shp')

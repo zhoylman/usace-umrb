@@ -29,22 +29,29 @@ rect_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/re
   st_geometry() %>%
   sf_as_ee()
 
+albers_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/albers_grid.shp') %>%
+  st_geometry() %>%
+  sf_as_ee()
+
 umrb_outline = st_read('/home/zhoylman/MCO/USACE/umrb_ace/UMRB_outline.shp') %>%
   st_geometry() %>%
   st_transform(4326)
 
 modal_statsgo_hex = ee$FeatureCollection('users/zhoylman/hex_modal_statsgo')
 modal_statsgo_rect = ee$FeatureCollection('users/zhoylman/rect_modal_statsgo')
+modal_statsgo_albers = ee$FeatureCollection('users/zhoylman/albers_modal_statsgo')
+
 
 clim_names = c('swe', 'pr', 'tmmx', 'def', 'aet')
-grid_names = c('hex', 'rect')
+grid_names = c('albers','hex', 'rect')
 base = paste0(ee_get_assethome(), '/usace-umrb/UMRB_USACE_clim_conditional')
-ee_hex_assets = apply(expand.grid(base,clim_names, grid_names[1]), 1, paste, collapse="_") 
-ee_rect_assets = apply(expand.grid(base,clim_names, grid_names[2]), 1, paste, collapse="_") 
+ee_hex_assets = apply(expand.grid(base,clim_names, grid_names[2]), 1, paste, collapse="_") 
+ee_rect_assets = apply(expand.grid(base,clim_names, grid_names[3]), 1, paste, collapse="_") 
+ee_albers_assets = apply(expand.grid(base,clim_names, grid_names[1]), 1, paste, collapse="_") 
 terrain_asset = ee$Image(paste0(ee_get_assethome(), '/usace-umrb/UMRB_USACE_terrain_conditional'))
 
-grid = 'rect' 
-export = F
+grid = 'albers' 
+export = T
 
 if(grid == 'hex'){
   selection = ee$Image(ee_hex_assets[1])$
@@ -79,7 +86,7 @@ if(grid == 'hex'){
       visParams = list(palette = (c("#FF0000"))),
       name = "Valid Pixels (soils)"
     ) +grid_map
-} else {
+} if(grid == 'rect') {
   selection = ee$Image(ee_rect_assets[1])$
     updateMask(ee$Image(ee_rect_assets[2]))$
     updateMask(ee$Image(ee_rect_assets[3]))$
@@ -141,12 +148,73 @@ if(grid == 'hex'){
     
     task_img$start()
   }
+} if(grid == 'albers') {
+  selection = ee$Image(ee_albers_assets[1])$
+    updateMask(ee$Image(ee_albers_assets[2]))$
+    updateMask(ee$Image(ee_albers_assets[3]))$
+    #updateMask(ee$Image(ee_albers_assets[4]))$
+    #updateMask(ee$Image(ee_albers_assets[5]))$
+    updateMask(terrain_asset)
+
+  selection_w_soils = ee$Image(ee_albers_assets[1])$
+    updateMask(ee$Image(ee_albers_assets[2]))$
+    updateMask(ee$Image(ee_albers_assets[3]))$
+    #updateMask(ee$Image(ee_albers_assets[4]))$
+    #updateMask(ee$Image(ee_albers_assets[5]))$
+    updateMask(terrain_asset)$
+    clip(modal_statsgo_albers)
+
+  grid_map = Map$addLayer(
+    eeObject = ee$Image()$paint(albers_grid, 0, 1),
+    visParams = {},
+    name = "Grid"
+  )
+  
+  Map$setCenter(lon = -103,lat = 46,zoom = 6)
+  Map$addLayer(
+    eeObject = selection,
+    visParams = {},
+    name = "Valid Pixels"
+  ) + Map$addLayer(
+    eeObject = selection_w_soils,
+    visParams = list(palette = (c("#FF0000"))),
+    name = "Valid Pixels (soils)"
+  ) + grid_map
+  
+  if(export == T){
+    assetid = paste0(ee_get_assethome(), 
+                     '/usace-umrb/UMRB_USACE_selection_albers_final_soils')
+    task_img <- ee_image_to_asset(
+      image = selection_w_soils,
+      assetId = assetid,
+      overwrite = TRUE,
+      scale = 30,
+      region = ee_roi$geometry(),
+      maxPixels = 100000000000
+    )
+    
+    task_img$start()
+    
+    assetid = paste0(ee_get_assethome(), 
+                     '/usace-umrb/UMRB_USACE_selection_albers_final')
+    task_img <- ee_image_to_asset(
+      image = selection,
+      assetId = assetid,
+      overwrite = TRUE,
+      scale = 30,
+      region = ee_roi$geometry(),
+      maxPixels = 100000000000
+    )
+    
+    task_img$start()
+  }
+  
 }
 
 
 #final map for export
 grid_map = Map$addLayer(
-  eeObject = ee$Image()$paint(rect_grid, 0, 1),
+  eeObject = ee$Image()$paint(albers_grid, 0, 1),
   visParams = {},
   name = "Grid"
 )
@@ -168,11 +236,11 @@ publicLands_map = Map$addLayer(
 )
 Map$setCenter(lon = -103,lat = 46,zoom = 6)
 Map$addLayer(
-  eeObject = ee$Image('users/zhoylman/usace-umrb/UMRB_USACE_selection_rect_final'),
+  eeObject = ee$Image('users/zhoylman/usace-umrb/UMRB_USACE_selection_albers_final'),
   visParams = {},
   name = "Valid Pixels"
 ) + Map$addLayer(
-  eeObject = ee$Image('users/zhoylman/usace-umrb/UMRB_USACE_selection_rect_final_soils'),
+  eeObject = ee$Image('users/zhoylman/usace-umrb/UMRB_USACE_selection_albers_final_soils'),
   visParams = list(palette = (c("#228B22"))),
   name = "Valid Pixels (soils)"
 ) + grid_map + publicLands_map + roads_map

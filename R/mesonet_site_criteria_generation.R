@@ -29,6 +29,10 @@ hex_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/hex
 rect_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/rect_grid.shp') %>%
   st_geometry() %>%
   sf_as_ee()
+#albers
+albers_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/albers_grid.shp') %>%
+  st_geometry() %>%
+  sf_as_ee()
 
 # Define a region of interest with sf (states)
 # for some reason the complex urmb geometry causes 
@@ -110,20 +114,21 @@ aet_climatology = compute_sum_climatology(years_climatology, terraClimate$select
 clim_list = list(swe, pr_climatology, tmmx_climatology, 
                  def_climatology, aet_climatology)
 
-grids = list(hex_grid, rect_grid)
+grids = list(albers_grid, hex_grid, rect_grid)
 # define some vectors for name generation for saving the data
 clim_names = c('swe', 'pr', 'tmmx', 'def', 'aet')
-grid_names = c('hex', 'rect')
+grid_names = c('albers','hex', 'rect')
 
 ###########################################
 ####### EXPORT CLIM MASKS IF NEEDED #######
 ###########################################
 #booleen to visualize.. Takes a while, so dont run this in the loop
 #durring export
-visualize_clim = T
+visualize_clim = F
 
 for(i in 1:length(clim_names)){
-  for(g in 1:length(grid_names)){
+  #for(g in 1:length(grid_names)){
+  for(g in 1){
     #compute upper quantile of clim vals within grids
     upper_grid = percentile_comp(var = clim_list[[i]], grid = grids[[g]], 
                                  percentile_int = 90, scale = 4000)
@@ -220,6 +225,11 @@ rect = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/rect_gr
   st_geometry() %>%
   as_Spatial()
 
+albers = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/albers_grid.shp') %>%
+  st_transform(4326) %>%
+  st_geometry() %>%
+  as_Spatial()
+
 #list to store STATSGO for each hex cell
 statsgo = list()
 
@@ -246,20 +256,20 @@ get_modal_statsgo = function(x){
 
 #loop through all the cells 
 # cant use apply on sp objects?! LAME!
-for(i in 1:length(hex)){
-  statsgo[[i]] = get_modal_statsgo(hex[i])
+for(i in 1:length(albers)){
+  statsgo[[i]] = get_modal_statsgo(albers[i])
   print(i)
-  if(i == length(hex)){
+  if(i == length(albers)){
     statsgo = do.call('rbind', statsgo)
   }
 }
 #plot and check
-plot(rect)
+plot(albers)
 plot(statsgo, add = T, col = 'red')
 
 #convert to sf and export
 statsgo_hex_sf = st_as_sf(statsgo_hex)
-st_write(statsgo %>% st_as_sf(), '/home/zhoylman/usace-umrb/output/station_selection_grids/rect_modal_statsgo.shp')
+st_write(statsgo %>% st_as_sf(), '/home/zhoylman/usace-umrb/output/station_selection_grids/albers_modal_statsgo.shp')
 
 ###########################################
 ####### SOIL WATER HOLDING CAPACITY  ######
