@@ -22,15 +22,7 @@ ee_Initialize(email = 'zhoylman@gmail.com', drive = TRUE)
 
 #import grids and convert to ee object
 #hex
-hex_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/hex_grid.shp') %>%
-  st_geometry() %>%
-  sf_as_ee()
-#rect
-rect_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/rect_grid.shp') %>%
-  st_geometry() %>%
-  sf_as_ee()
-#albers
-albers_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/albers_grid.shp') %>%
+hex_grid = st_read('~/usace-umrb/output/umrb_hex_500mi2_albers.shp') %>%
   st_geometry() %>%
   sf_as_ee()
 
@@ -38,7 +30,7 @@ albers_grid = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/
 # for some reason the complex urmb geometry causes 
 #ee python api time-out error??? No problem.. States work
 ee_roi = st_read("/home/zhoylman/mesonet-dashboard/data/shp/states.shp") %>%
-  dplyr::filter(STATE_ABBR %in% c('MT', 'WY', 'ND', 'SD', 'NE')) %>%
+  dplyr::filter(STATE_ABBR %in% c('MT', 'WY', 'ND', 'SD', 'NE', 'MN', 'IA')) %>%
   #st_intersection(umrb_outline)%>%
   st_geometry() %>%
   sf_as_ee()
@@ -114,10 +106,10 @@ aet_climatology = compute_sum_climatology(years_climatology, terraClimate$select
 clim_list = list(swe, pr_climatology, tmmx_climatology, 
                  def_climatology, aet_climatology)
 
-grids = list(albers_grid, hex_grid, rect_grid)
+grids = list(hex_grid)
 # define some vectors for name generation for saving the data
 clim_names = c('swe', 'pr', 'tmmx', 'def', 'aet')
-grid_names = c('albers','hex', 'rect')
+grid_names = c('hex')
 
 ###########################################
 ####### EXPORT CLIM MASKS IF NEEDED #######
@@ -125,16 +117,15 @@ grid_names = c('albers','hex', 'rect')
 #booleen to visualize.. Takes a while, so dont run this in the loop
 #durring export
 visualize_clim = F
-
+scales = c(250,4000,4000,4000,4000)
 for(i in 1:length(clim_names)){
-  #for(g in 1:length(grid_names)){
-  for(g in 1){
+  for(g in 1:length(grid_names)){
     #compute upper quantile of clim vals within grids
     upper_grid = percentile_comp(var = clim_list[[i]], grid = grids[[g]], 
-                                 percentile_int = 90, scale = 4000)
+                                 percentile_int = 90, scale = scales[i]) # if swe!!!
     #compute lower quantile of clim vals within grids
     lower_grid = percentile_comp(var = clim_list[[i]], grid = grids[[g]], 
-                                 percentile_int = 10, scale = 4000)
+                                 percentile_int = 10, scale = scales[i])
     #compute valid pixels within percentile grids
     valid_pixels = clim_list[[i]]$
       gte(lower_grid)$
@@ -199,7 +190,7 @@ for(i in 1:length(clim_names)){
       image = valid_pixels,
       assetId = assetid,
       overwrite = TRUE,
-      scale = 4000,
+      scale = scales[i],
       region = ee_roi$geometry()
     )
     
@@ -210,22 +201,8 @@ for(i in 1:length(clim_names)){
 ###########################################
 ################   SOILS  #################
 ###########################################
-#import states again for viz
-states = st_read('~/usace-umrb/data/states.shp') %>%
-  filter(STATE_ABBR %in% c('MT',"SD","ND",'WY','NE')) 
-
 #import hex and convert to sp for STATSGO data retrieval
-hex = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/hex_grid.shp') %>%
-  st_transform(4326) %>%
-  st_geometry() %>%
-  as_Spatial()
-
-rect = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/rect_grid.shp') %>%
-  st_transform(4326) %>%
-  st_geometry() %>%
-  as_Spatial()
-
-albers = st_read('/home/zhoylman/usace-umrb/output/station_selection_grids/albers_grid.shp') %>%
+hex = st_read('~/usace-umrb/output/umrb_hex_500mi2_albers.shp') %>%
   st_transform(4326) %>%
   st_geometry() %>%
   as_Spatial()
@@ -256,105 +233,16 @@ get_modal_statsgo = function(x){
 
 #loop through all the cells 
 # cant use apply on sp objects?! LAME!
-for(i in 1:length(albers)){
-  statsgo[[i]] = get_modal_statsgo(albers[i])
+for(i in 1:length(hex)){
+  statsgo[[i]] = get_modal_statsgo(hex[i])
   print(i)
-  if(i == length(albers)){
+  if(i == length(hex)){
     statsgo = do.call('rbind', statsgo)
   }
 }
 #plot and check
-plot(albers)
+plot(hex)
 plot(statsgo, add = T, col = 'red')
 
 #convert to sf and export
-statsgo_hex_sf = st_as_sf(statsgo_hex)
-st_write(statsgo %>% st_as_sf(), '/home/zhoylman/usace-umrb/output/station_selection_grids/albers_modal_statsgo.shp')
-
-###########################################
-####### SOIL WATER HOLDING CAPACITY  ######
-###########################################
-
-#not using this currently in the final grid generation
-soil_data = ee$Image('users/zhoylman/statsgo_AWC_conus_240m')%>%
-  clip_mask(., 'soil_awc', ee_roi, elevation_mask)
-
-visualize_soil = TRUE
-
-for(g in 1:length(grid_names)){
-  #compute upper quantile of soil vals within grids
-  upper_grid = percentile_comp(var = soil_data, grid = grids[[g]], 
-                               percentile_int = 80, scale = 240)
-  #compute lower quantile of soil vals within grids
-  lower_grid = percentile_comp(var = soil_data, grid = grids[[g]], 
-                               percentile_int = 20, scale = 240)
-  #compute valid pixels within percentile grids
-  valid_pixels = soil_data$
-    gte(lower_grid)$
-    selfMask()$
-    updateMask(soil_data$lte(upper_grid))
-  
-  if(visualize_soil == TRUE){
-    #visualize if you so please
-    Map$setCenter(lon = -110,lat = 47,zoom = 6)
-    
-    #add all layers to the map view.. working on a 
-    #nicer way to do this.... also takes a while to 
-    #render... 
-    raw_data_map = Map$addLayer(
-      eeObject = soil_data,
-      visParams = list(
-        min = 0,
-        max = 20,
-        palette = (c("#FF0000","#FFFFFF","#0000FF"))
-      ),
-      name = "Raw Data"
-    )  
-    
-    lower_map = Map$addLayer(
-      eeObject = lower_grid,
-      visParams = list(min = 0, max = 20, palette = c("#FF0000","#FFFFFF","#0000FF")),
-      name = "Lower Percentile"
-    )  
-    
-    upper_map = Map$addLayer(
-      eeObject = upper_grid,
-      visParams = list(min = 0, max = 20, palette = c("#FF0000","#FFFFFF","#0000FF")),
-      name = "Upper Percentile"
-    ) 
-    
-    valid_px_map = Map$addLayer(
-      eeObject = valid_pixels,
-      visParams = list(min = 0, max = 1, palette = c("black")),
-      name = "selected"
-    ) 
-    
-    grid_map = Map$addLayer(
-      eeObject = ee$Image()$paint(grids[[g]], 0, 1),
-      visParams = {},
-      name = "Grid"
-    )
-    
-    #display the map 
-    raw_data_map + 
-      lower_map +
-      upper_map +
-      valid_px_map + 
-      grid_map
-  }
-  
-  # compute asset name
-  assetid <- paste0(ee_get_assethome(), 
-                    '/usace-umrb/UMRB_USACE_soils_conditional_', 
-                    grid_names[g])
-  #export
-  task_img <- ee_image_to_asset(
-    image = valid_pixels,
-    assetId = assetid,
-    overwrite = TRUE,
-    scale = 240,
-    region = ee_roi$geometry()
-  )
-  
-  task_img$start()
-}
+st_write(statsgo %>% st_as_sf(), '~/usace-umrb/output/umrb_hex_500mi2_albers_modal_statsgo.shp')
